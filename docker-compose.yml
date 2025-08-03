@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # LocalLambdaCognitoProxy main service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: locallambdacognitoproxy
+    ports:
+      - "3000:3000"
+    environment:
+      # Server configuration
+      - NODE_ENV=production
+      - PORT=3000
+      
+      # Proxy target (override in .env or docker-compose.override.yml)
+      - PROXY_TARGET=http://host.docker.internal:7860
+      
+      # AWS Cognito settings (set in .env file)
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+      - COGNITO_DOMAIN=${COGNITO_DOMAIN}
+      - COGNITO_REDIRECT_URI=${COGNITO_REDIRECT_URI:-http://localhost:3000/parseauth}
+      - COGNITO_REGION=${COGNITO_REGION}
+      - COOKIE_EXPIRATION_DAYS=${COOKIE_EXPIRATION_DAYS:-365}
+    
+    env_file:
+      - .env
+    
+    networks:
+      - cognito-proxy-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/cookies', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+
+  # Example target service (for testing)
+  # Uncomment this if you want to test without external proxy target
+  # target-app:
+  #   image: nginx:alpine
+  #   container_name: target-app
+  #   ports:
+  #     - "7860:80"
+  #   volumes:
+  #     - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+  #   networks:
+  #     - cognito-proxy-network
+
+networks:
+  cognito-proxy-network:
+    driver: bridge
+    name: cognito-proxy-network
+
+# Development override example
+# Create docker-compose.override.yml for development settings:
+# version: '3.8'
+# services:
+#   app:
+#     build:
+#       target: development
+#     environment:
+#       - NODE_ENV=development
+#     volumes:
+#       - ./src:/app/src:ro
+#       - ./package.json:/app/package.json:ro
+#     command: ["npm", "run", "dev"]

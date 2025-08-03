@@ -1,0 +1,61 @@
+name: Docker Build Test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+jobs:
+  docker-build-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (test only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: locallambdacognitoproxy:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          # Run the container in detached mode
+          docker run -d --name test-container \
+            -p 3000:3000 \
+            -e NODE_ENV=test \
+            -e COGNITO_USER_POOL_ID=test \
+            -e COGNITO_CLIENT_ID=test \
+            -e COGNITO_DOMAIN=test.auth.us-east-1.amazoncognito.com \
+            -e PROXY_TARGET=http://httpbin.org \
+            locallambdacognitoproxy:test
+
+          # Wait for container to start
+          sleep 10
+
+          # Test health endpoint
+          curl -f http://localhost:3000/cookies || exit 1
+
+          # Clean up
+          docker stop test-container
+          docker rm test-container
+
+      - name: Scan for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: locallambdacognitoproxy:test
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
