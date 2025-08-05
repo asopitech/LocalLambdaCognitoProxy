@@ -1,8 +1,9 @@
 import express from 'express';
-import { CognitoAtEdge } from 'cognito-at-edge';
+import { Authenticator } from 'cognito-at-edge';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+import http from 'http';
 
 // 環境変数を読み込み
 dotenv.config();
@@ -13,7 +14,8 @@ const app = express();
 app.use(cookieParser());
 
 // cognito-at-edge の設定
-const cognitoAtEdge = new CognitoAtEdge({
+const cognitoAtEdge = new Authenticator({
+  region: process.env.COGNITO_REGION,
   userPoolId: process.env.COGNITO_USER_POOL_ID,
   userPoolAppId: process.env.COGNITO_CLIENT_ID,
   userPoolDomain: process.env.COGNITO_DOMAIN,
@@ -118,12 +120,25 @@ app.get('/cookies', (req, res) => {
 const proxyTarget = process.env.PROXY_TARGET || 'http://localhost:7860';
 console.log(`プロキシ先設定: ${proxyTarget}`);
 
+// Keep-Alive エージェントを作成
+const keepAliveAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000, // 30秒
+  maxSockets: 50,
+  maxFreeSockets: 10,
+  timeout: 60000 // 60秒
+});
+
 app.use(
   '/',
   createProxyMiddleware({
     target: proxyTarget,
     changeOrigin: true,
     ws: true, // WebSocket サポート
+    xfwd: true, // X-Forwarded-* ヘッダーを追加
+    secure: false, // HTTPS の検証を無効化（ローカル開発用）
+    logLevel: 'debug', // ログレベルをデバッグに設定
+    agent: keepAliveAgent, // Keep-Alive エージェントを設定
     onError: (err, req, res) => {
       console.error('プロキシエラー:', err.message);
       res.status(502).json({
